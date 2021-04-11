@@ -1,0 +1,237 @@
+---
+title: "analysis_visualization"
+author: "Catherine C. Pollack"
+date: "4/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Bring in Libraries and Packages
+```{r, echo = FALSE}
+list.of.packages <- c("tidyverse", "janitor", "reshape2", "magrittr", "ggsci", "rgdal", "rgeos", "gganimate", "gifski", "RColorBrewer")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+for (lib in list.of.packages) {
+  library(lib, character.only = TRUE)
+}
+```
+
+# Bring in Data
+```{r}
+queries <- read.csv("210411_queries_raw_score.csv") %>%
+  clean_names()
+
+categorized_queries <- read.csv("/Users/cpollack/Documents/GST & Wiki Brainstorm - GST.csv") %>%
+  clean_names()
+
+queries_us <- read.csv("210411_queries_raw_score_us.csv") %>%
+  clean_names()
+
+dma <- readOGR("dma_2008/DMAs.shp")
+```
+
+# Combines DMA-Level and US
+```{r}
+queries_all <- rbind(queries, queries_us)
+```
+
+# Fix Data
+```{r}
+queries_all$date_date <- as.Date(queries_all$date, format = c("%b %d %Y"))
+```
+
+# Reformat Data for Plotting
+```{r}
+queries_all %<>%
+  select(-x)
+
+queries_long <- queries_all %>%
+  select(-date) %>%
+  melt(id.vars = c("date_date", "dma"))
+```
+
+# Bring in categories for variables in initial list
+```{r}
+categorized_queries %<>%
+  mutate(formatted_query = gsub("\"", "", suggested_query),
+         formatted_query = gsub(" ", "_", formatted_query))
+  
+queries_long_categories <- categorized_queries %>%
+  select(formatted_query, category_of_query) %>%
+  left_join(., queries_long, by = c("formatted_query" = "variable"))
+
+queries_long_categories_nozero_us_only <- queries_long_categories %>%
+  group_by(formatted_query) %>%
+  filter(dma == "usa")
+ 
+queries_long_categories_nozero_us_only$formatted_query_factor <- factor(queries_long_categories_nozero_us_only$formatted_query, levels = c("vaccine_exemption", "covid_vaccine_mandatory", "vaccine_side_effects", "vaccine_long_term_effects", "covid_vaccine_ingredients", "where_to_get_covid_vaccine", "covid_vaccine_safe", "pfizer_moderna_astrazeneca", "vaccine_priority", "vaccine_infertility", "covid_vaccine_death", "vaccine_microchip", "covid_vaccine_change_dna", "aborted_fetus_vaccine", "polio_vaccine_covid", "bells_palsy_covid_vaccine", "vaccine_bill_gates"))
+```
+
+# Plot of categorized queries overall
+```{r}
+queries_long_categories_nozero_us_only %>%
+  ggplot(aes(x = date_date, y = log(value), color = category_of_query)) +
+  geom_point() +
+  facet_wrap(~formatted_query_factor) +
+  theme_classic() +
+  scale_color_nejm() +
+  labs(x = "Date",
+       y = "Log GST Score",
+       color = "Query Category") +
+  scale_x_date(date_labels = "%m/%y") +
+  theme(strip.text.x = element_text(size = 4.5),
+        axis.text = element_text(size = 6.5))
+ggsave("210411_gst_initial_list.tiff", width = 7.25, height = 4.51)
+```
+
+# DMA formatting
+```{r}
+dma_df <- fortify(dma, region = "DMA")
+dma_df <- rename(dma_df, DMA = id)
+
+#Testing to see if it worked
+ggplot(dma_df, aes(x=long, y=lat, group=group)) +
+  geom_polygon(color="black", size=.5, fill="white") +
+  coord_map() +
+  theme_void()
+```
+
+# Plotting "COVID vaccine safe"
+```{r}
+#2020-02-02, 2020-04-05, 2020-06-07, 2020-08-02, 2020-10-04, 2020-12-06, 2021-02-07, 2021-04-04 
+date_list <- c("2020-02-02", "2020-04-05", "2020-06-07", "2020-08-02", "2020-10-04", "2020-12-06", "2021-02-07", "2021-04-04")
+date_list <- lapply(date_list, as.Date)
+queries_long_categories_safety <- queries_long_categories %>%
+  filter(formatted_query == "covid_vaccine_safe") %>%
+  filter(dma != "usa") %>%
+  #filter(date_date %in% date_list)
+  filter(date_date == as.Date("2021-04-04"))
+
+dma_df %>%
+  left_join(queries_long_categories_safety, by = c("DMA" = "dma")) %>%
+  ggplot(aes(x = long, y = lat, group = group, fill = value)) +
+  geom_polygon(color="black", size=.5) +
+  scale_fill_gradient(low = "white", high = "red", na.value = "lightgrey") +
+  coord_map() +
+  theme_void() +
+  labs(fill = "GST",
+       title = "GST for the week of April 04, 2021 for the query: \"COVID Vaccine Safe\"")
+ggsave("210411_gst_map_covid_vaccine_safe.tiff", width = 7.25, height = 4.51)
+
+queries_long_categories_safety_2020 <- queries_long_categories %>%
+  filter(formatted_query == "covid_vaccine_safe") %>%
+  filter(dma != "usa") %>%
+  #filter(date_date %in% date_list)
+  filter(date_date == as.Date("2020-04-05"))
+
+dma_df %>%
+  left_join(queries_long_categories_safety_2020, by = c("DMA" = "dma")) %>%
+  ggplot(aes(x = long, y = lat, group = group, fill = value)) +
+  geom_polygon(color="black", size=.5) +
+  scale_fill_gradient(low = "white", high = "red", na.value = "lightgrey") +
+  coord_map() +
+  theme_void() +
+  labs(fill = "GST",
+       title = "GST for the week of April 05, 2020 for the query: \"COVID Vaccine Safe\"")
+ggsave("210411_gst_map_covid_vaccine_safe_2020.tiff", width = 7.25, height = 4.51)
+
+```
+
+# Geospatial Plotting  for "Vaccine Side Effects
+```{r}
+queries_long_categories_side_effects <- queries_long_categories %>%
+  filter(formatted_query == "vaccine_side_effects") %>%
+  filter(dma != "usa") %>%
+  filter(date_date == "2021-04-04")
+
+dma_df %>%
+  left_join(queries_long_categories_side_effects, by = c("DMA" = "dma")) %>%
+  ggplot(aes(x = long, y = lat, group = group, fill = value)) +
+  geom_polygon(color="black", size=.5) +
+  scale_fill_gradient(low = "white", high = "darkgreen", na.value = "lightgrey") +
+  coord_map() +
+  theme_void() +
+  labs(fill = "GST",
+       title = "GST for the week of April 04, 2021 for the query: \"Vaccine Side Effects\"")
+ggsave("210411_gst_map_vaccine_side_effects.tiff", width = 7.25, height = 4.51)
+
+queries_long_categories_side_effects_2020 <- queries_long_categories %>%
+  filter(formatted_query == "vaccine_side_effects") %>%
+  filter(dma != "usa") %>%
+  filter(date_date == as.Date("2020-04-05"))
+
+dma_df %>%
+  left_join(queries_long_categories_side_effects_2020, by = c("DMA" = "dma")) %>%
+  ggplot(aes(x = long, y = lat, group = group, fill = value)) +
+  geom_polygon(color="black", size=.5) +
+  scale_fill_gradient(low = "white", high = "darkgreen", na.value = "lightgrey") +
+  coord_map() +
+  theme_void() +
+  labs(fill = "GST",
+       title = "GST for the week of April 05, 2020 for the query: \"Vaccine Side Effects\"")
+ggsave("210411_gst_map_vaccine_side_effects_2020.tiff", width = 7.25, height = 4.51)
+
+```
+
+# Highest Volume Queries per DMA per Month
+```{r}
+queries_long %>%
+  group_by(date_date, dma) %>%
+  mutate(max_value = max(value)) %>%
+  filter(value == max_value) %>%
+  arrange(date_date, dma) %>%
+  mutate(value_new = case_when(
+    value == 0 ~ "no_queries_recorded",
+    value != 0 ~ as.character(variable))) %>%
+  distinct(date_date, dma, value_new, .keep_all = TRUE) %>%
+  ungroup() %>%
+  group_by(date_date, value_new) %>%
+  summarise(count = n()) %>%
+  #filter(date_date <= "2020-12-31" & date_date >= "2020-03-01") %>%
+  filter(date_date > "2020-12-31") %>%
+  ggplot(aes(x = reorder(value_new, count), y = count)) +
+  geom_bar(stat = "identity",
+           fill = "dodgerblue",
+           color = "black") +
+  theme_classic() +
+  facet_wrap(~date_date) +
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 4)) +
+  labs(x = "Count",
+       y = "Query",
+       title = "Highest Volume Queries per DMA per week, 2021")
+ggsave("210411_highest_volume_query_2021.tiff", width = 7.25, height = 4.51)
+```
+
+# Query Titles
+```{r}
+queries_tile <- queries_long %>%
+  group_by(date_date, dma) %>%
+  mutate(max_value = max(value)) %>%
+  filter(value == max_value) %>%
+  arrange(date_date, dma) %>%
+  mutate(value_new = case_when(
+    value == 0 ~ "no_queries_recorded",
+    value != 0 ~ as.character(variable))) %>%
+  distinct(date_date, dma, value_new, .keep_all = TRUE)
+
+nb.cols <- length(unique(queries_tile$value_new))
+mycolors <- colorRampPalette(brewer.pal(8, "Set1"))(nb.cols)
+
+ggplot(queries_tile, aes(x = date_date, y = dma)) + 
+  geom_tile(aes(fill = value_new))  + 
+  scale_fill_manual(values = mycolors) +
+  theme_classic() +
+  labs(x = "Date",
+       y = "DMA",
+       fill = "Query") +
+  theme(axis.text.y = element_text(size = 3))
+  #scale_fill_brewer(palette = "Greens")
+ggsave("210411_heatmap.tiff", width = 7.25, height = 4.51)
+
+```
+
